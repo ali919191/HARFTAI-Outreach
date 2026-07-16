@@ -4,6 +4,38 @@ Automates daily outreach + follow-ups to your pilot-batch list, tracks
 replies and bounces, and keeps your Google Sheet updated as a live
 dashboard.
 
+## How a company moves through the pipeline
+
+```
+Prospects tab (research/staging)  --promote_prospect.py-->  Outreach tab (live send pipeline)
+       ^                                                            |
+       |                                                    send_and_followup.py /
+  import_prospects.py                                       check_replies_bounces.py
+  generate_campaign_copy.py
+```
+
+- **`Prospects`** — one row per researched company (currently 60, across
+  HVAC/Electrical/Dental/Accident Law). Nothing here is ever emailed
+  automatically. Fill in `Contact Name`, `Business Email`, and set
+  `Consent Check` to `Confirmed` once you've found and vetted a real
+  decision-maker.
+- **`Campaign Copy`** — a personalized 3-email sequence per company
+  (Day 1 / Day 4 / Day 9), generated once by `generate_campaign_copy.py`.
+  Hand-edit any cell here any time — the generator never overwrites a row
+  that already exists, so your edits are permanent.
+- **`promote_prospect.py "Company Name"`** — the one manual gate. Refuses
+  to run unless Contact Name + Business Email + a confirmed Consent Check
+  are all set. On success, copies the lead into `Outreach` as a new row,
+  where the existing daily/30-min automation picks it up.
+- **`Outreach`** — unchanged: the live send pipeline `send_and_followup.py`
+  and `check_replies_bounces.py` already watch. It now pulls each
+  company's copy from `Campaign Copy` (matched by Company name) instead of
+  a single generic template — falling back to the old generic HVAC
+  template only for leads with no matching Campaign Copy row (e.g. hand-
+  added leads, or the original `Test Co 1` test row).
+- **`Dashboard` / `HARFT Brief` / `Lists`** — reporting and reference tabs,
+  set up once by `setup_reporting_tabs.py`.
+
 ## What this can and can't see (read this first)
 
 | Signal | Tracked? | Notes |
@@ -130,10 +162,17 @@ This is B2B cold outreach, so keep it CAN-SPAM-compliant:
 
 | File | Purpose |
 |---|---|
-| `common.py` | Shared config + Google Sheet helpers |
-| `email_templates.py` | Subject/body text for each step -- edit freely |
-| `send_and_followup.py` | Daily job: sends initial emails + follow-ups |
+| `common.py` | Shared config + Google Sheet helpers (all tabs) |
+| `email_templates.py` | Legacy generic template + `SECTOR_CONFIG`/`build_campaign()` used to generate Campaign Copy |
+| `prospects_data.py` | Raw 60-company research list |
+| `import_prospects.py` | One-time: loads `prospects_data.py` into the `Prospects` tab |
+| `migrate_prospects_schema.py` | One-shot: migrated `Prospects` to the 23-column schema (Contact Title + Contact 2/3) |
+| `generate_campaign_copy.py` | One-time per company: writes personalized 3-email sequences into `Campaign Copy` |
+| `promote_prospect.py` | Moves one vetted, consented prospect from `Prospects` into `Outreach` |
+| `setup_reporting_tabs.py` | One-time: builds `Dashboard`, `HARFT Brief`, `Lists` tabs |
+| `setup_outreach_formatting.py` | One-time: color-codes the `Outreach` Status/Opens columns |
+| `send_and_followup.py` | Daily job: sends initial emails + follow-ups, using `Campaign Copy` when available |
 | `check_replies_bounces.py` | Frequent job: detects replies + bounces |
-| `tracking_server.py` | Public web service for the open pixel + unsubscribe |
+| `tracking_server.py` | Public web service for the open pixel + unsubscribe (deployed on Render) |
 | `requirements.txt` | Python dependencies |
 | `.env.example` | Copy to `.env` and fill in |

@@ -20,14 +20,50 @@ from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import gspread
+
 from common import (
-    get_sheet, read_rows, update_cells, new_tracking_id, today_str,
+    get_workbook, read_rows, update_cells, new_tracking_id, today_str,
     parse_date, days_from_now, ZOHO_EMAIL, ZOHO_APP_PASSWORD,
     ZOHO_SMTP_HOST, ZOHO_SMTP_PORT, SENDER_NAME, BUSINESS_ADDRESS,
     TRACKING_BASE_URL, FOLLOWUP_DAYS, MAX_STEPS, PARK_AFTER_DAYS,
     STATUS_NEW, STATUS_SENT_PREFIX, STATUS_PARKED, TERMINAL_STATUSES,
+    SHEET_TAB_NAME, CAMPAIGN_COPY_COLUMNS,
 )
 from email_templates import STEP_TEMPLATES
+
+
+def load_campaign_copy(sh):
+    """Return {company_name: {'subject': ..., 0: body, 1: body, 2: body}}
+    from the 'Campaign Copy' tab, or {} if that tab doesn't exist yet
+    (e.g. generate_campaign_copy.py hasn't been run)."""
+    try:
+        ws = sh.worksheet("Campaign Copy")
+    except gspread.WorksheetNotFound:
+        return {}
+
+    lookup = {}
+    for row in ws.get_all_records(expected_headers=CAMPAIGN_COPY_COLUMNS):
+        company = row.get("Company")
+        if not company:
+            continue
+        lookup[company] = {
+            "subject": row.get("Subject", ""),
+            0: row.get("Email 1 (Day 1)", ""),
+            1: row.get("Email 2 (Day 4)", ""),
+            2: row.get("Email 3 (Day 9)", ""),
+        }
+    return lookup
+
+
+def personalize(text, contact_name):
+    """Fill in the [First name] / [Sender] placeholders left unresolved in
+    Campaign Copy rows (they can't be resolved until send time, since the
+    prospect's real contact name isn't known when the copy is generated)."""
+    return (
+        text.replace("[First name]", contact_name or "there")
+            .replace("[Sender]", SENDER_NAME)
+    )
 
 
 def build_message(to_email, subject, body_text, tracking_id):
@@ -99,7 +135,9 @@ def mark_stale_as_parked(sheet, rows):
 
 
 def main():
-    sheet = get_sheet()
+    sh = get_workbook()
+    sheet = sh.worksheet(SHEET_TAB_NAME)
+    campaign_copy = load_campaign_copy(sh)
     rows = read_rows(sheet)
 
     sent_count = 0
@@ -108,18 +146,27 @@ def main():
         if step is None:
             continue
 
-        template = STEP_TEMPLATES.get(step)
-        if not template:
-            continue
+        company_copy = campaign_copy.get(row["Company"])
+        if company_copy and company_copy.get(step):
+            # Personalized copy from the Campaign Copy tab (sector-specific,
+            # hand-editable). This is the primary path once a lead has been
+            # promoted from Prospects.
+            subject = company_copy["subject"]
+            body = personalize(company_copy[step], row["Contact Name"])
+        else:
+            # Legacy generic fallback -- used for leads with no matching
+            # Campaign Copy row (e.g. manually added leads or old test rows).
+            template = STEP_TEMPLATES.get(step)
+            if not template:
+                continue
+            subject = template["subject"].format(company=row["Company"])
+            body = template["body"].format(
+                contact_name=row["Contact Name"] or "there",
+                company=row["Company"],
+                sender_name=SENDER_NAME,
+            )
 
         tracking_id = row["Tracking ID"] or new_tracking_id()
-        subject = template["subject"].format(company=row["Company"])
-        body = template["body"].format(
-            contact_name=row["Contact Name"] or "there",
-            company=row["Company"],
-            sender_name=SENDER_NAME,
-        )
-
         msg = build_message(row["Email"], subject, body, tracking_id)
 
         try:
