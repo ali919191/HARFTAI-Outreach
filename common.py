@@ -43,10 +43,25 @@ PARK_AFTER_DAYS = int(os.environ.get("PARK_AFTER_DAYS", 5))
 # ---------------- Sheet schema ----------------
 # This exact header row (in this order) must exist in row 1 of your sheet.
 COLUMNS = [
-    "Company", "Contact Name", "Email", "Status", "Sequence Step",
+    "Company", "Research", "Contact Name", "Email", "Send Approval", "Status", "Sequence Step",
     "Last Sent Date", "Next Action Date", "Opens", "Last Open Date",
     "Replied", "Reply Date", "Bounce Type", "Tracking ID", "Notes",
 ]
+
+# "Research" (Yes/No, default No): set to Yes on a manually-pasted row with
+# just a Company name and nothing else -- the scheduled research pass looks
+# for this flag and fills in Contact Name/Email using free sources only
+# (never Apollo -- that requires live per-call confirmation an unattended
+# run can't get). Never sends anything by itself.
+RESEARCH_YES = "Yes"
+RESEARCH_NO = "No"
+
+# "Send Approval" (Yes/No, default No): the final human gate. Even a fully
+# populated, correctly-sequenced row will NOT be sent by send_and_followup.py
+# unless this is Yes. You flip this yourself after reviewing the Campaign
+# Copy that would actually go out.
+SEND_APPROVAL_YES = "Yes"
+SEND_APPROVAL_NO = "No"
 
 STATUS_NEW = "New"
 STATUS_SENT_PREFIX = "Sent - Step"

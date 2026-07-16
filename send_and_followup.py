@@ -28,7 +28,7 @@ from common import (
     ZOHO_SMTP_HOST, ZOHO_SMTP_PORT, SENDER_NAME, BUSINESS_ADDRESS,
     TRACKING_BASE_URL, FOLLOWUP_DAYS, MAX_STEPS, PARK_AFTER_DAYS,
     STATUS_NEW, STATUS_SENT_PREFIX, STATUS_PARKED, TERMINAL_STATUSES,
-    SHEET_TAB_NAME, CAMPAIGN_COPY_COLUMNS,
+    SHEET_TAB_NAME, CAMPAIGN_COPY_COLUMNS, SEND_APPROVAL_YES,
 )
 from email_templates import STEP_TEMPLATES
 
@@ -95,7 +95,17 @@ def send_email(msg, to_email):
 
 
 def decide_action(row):
-    """Return the step number (0, 1, 2, ...) to send now, or None to do nothing."""
+    """Return the step number (0, 1, 2, ...) to send now, or None to do nothing.
+
+    Send Approval is checked first and unconditionally: even a lead that's
+    otherwise fully due for its initial send or a follow-up will NOT go out
+    until a human has flipped this to Yes on that row. This is the final
+    gate -- it exists so you can review the exact Campaign Copy that would
+    be sent before any automation touches a real inbox.
+    """
+    if str(row.get("Send Approval", "")).strip() != SEND_APPROVAL_YES:
+        return None
+
     status = row["Status"] or STATUS_NEW
 
     if status in TERMINAL_STATUSES:

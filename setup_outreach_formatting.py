@@ -16,6 +16,11 @@ What gets colored (all of this is real, sender-visible signal):
     Opens column
         > 0            -> light blue (tracking pixel fired at least once --
                                        approximate, see README)
+    Research column
+        Yes             -> light blue (queued for the automatic research pass)
+    Send Approval column
+        Yes             -> green  (cleared to send)
+        No              -> gray   (default -- nothing will be sent)
 
 What will NEVER be colored, because no sender-side tool -- not this one,
 not Gmail, not HubSpot, not Mailchimp -- can see it: whether a message was
@@ -31,7 +36,9 @@ Usage:
     python setup_outreach_formatting.py
 """
 
-from common import get_workbook, SHEET_TAB_NAME, COLUMNS
+from gspread.utils import ValidationConditionType
+
+from common import get_workbook, SHEET_TAB_NAME, COLUMNS, col_letter
 
 COLORS = {
     "green": {"red": 0.867, "green": 0.953, "blue": 0.910},
@@ -84,10 +91,14 @@ def main():
         for _ in range(existing_rule_count)
     ]
 
-    status_col = COLUMNS.index("Status")
-    opens_col = COLUMNS.index("Opens")
-    status_range = {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": status_col, "endColumnIndex": status_col + 1}
-    opens_range = {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": opens_col, "endColumnIndex": opens_col + 1}
+    def col_range(name):
+        idx = COLUMNS.index(name)
+        return {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": idx, "endColumnIndex": idx + 1}
+
+    status_range = col_range("Status")
+    opens_range = col_range("Opens")
+    research_range = col_range("Research")
+    approval_range = col_range("Send Approval")
 
     requests += [
         _rule(status_range, {"type": "TEXT_EQ", "values": [{"userEnteredValue": "Replied"}]}, COLORS["green"], COLORS["green_text"]),
@@ -96,11 +107,31 @@ def main():
         _rule(status_range, {"type": "TEXT_EQ", "values": [{"userEnteredValue": "No Response - Parked"}]}, COLORS["gray"], COLORS["gray_text"]),
         _rule(status_range, {"type": "TEXT_STARTS_WITH", "values": [{"userEnteredValue": "Sent"}]}, COLORS["yellow"], COLORS["yellow_text"]),
         _rule(opens_range, {"type": "NUMBER_GREATER", "values": [{"userEnteredValue": "0"}]}, COLORS["blue"], COLORS["blue_text"]),
+        _rule(research_range, {"type": "TEXT_EQ", "values": [{"userEnteredValue": "Yes"}]}, COLORS["blue"], COLORS["blue_text"]),
+        _rule(approval_range, {"type": "TEXT_EQ", "values": [{"userEnteredValue": "Yes"}]}, COLORS["green"], COLORS["green_text"]),
+        _rule(approval_range, {"type": "TEXT_EQ", "values": [{"userEnteredValue": "No"}]}, COLORS["gray"], COLORS["gray_text"]),
     ]
 
     sh.batch_update({"requests": requests})
     added = len(requests) - existing_rule_count
-    print(f"Applied {added} conditional formatting rule(s) to {SHEET_TAB_NAME}!Status and !Opens (replaced {existing_rule_count} old rule(s), if any).")
+    print(f"Applied {added} conditional formatting rule(s) to {SHEET_TAB_NAME} (replaced {existing_rule_count} old rule(s), if any).")
+
+    # Yes/No dropdowns for Research and Send Approval.
+    research_col = col_letter(COLUMNS, "Research")
+    approval_col = col_letter(COLUMNS, "Send Approval")
+    ws.add_validation(
+        f"{research_col}2:{research_col}1000",
+        ValidationConditionType.one_of_list,
+        ["Yes", "No"],
+        showCustomUi=True,
+    )
+    ws.add_validation(
+        f"{approval_col}2:{approval_col}1000",
+        ValidationConditionType.one_of_list,
+        ["Yes", "No"],
+        showCustomUi=True,
+    )
+    print(f"Dropdowns added (Research={research_col}, Send Approval={approval_col}).")
 
 
 if __name__ == "__main__":

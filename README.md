@@ -27,14 +27,35 @@ Prospects tab (research/staging)  --promote_prospect.py-->  Outreach tab (live s
   to run unless Contact Name + Business Email + a confirmed Consent Check
   are all set. On success, copies the lead into `Outreach` as a new row,
   where the existing daily/30-min automation picks it up.
-- **`Outreach`** — unchanged: the live send pipeline `send_and_followup.py`
-  and `check_replies_bounces.py` already watch. It now pulls each
-  company's copy from `Campaign Copy` (matched by Company name) instead of
-  a single generic template — falling back to the old generic HVAC
-  template only for leads with no matching Campaign Copy row (e.g. hand-
-  added leads, or the original `Test Co 1` test row).
+- **`Outreach`** — the live send pipeline `send_and_followup.py` and
+  `check_replies_bounces.py` watch. It pulls each company's copy from
+  `Campaign Copy` (matched by Company name) instead of a single generic
+  template — falling back to the old generic HVAC template only for leads
+  with no matching Campaign Copy row (e.g. hand-added leads, or the
+  original `Test Co 1` test row). Two extra columns gate everything:
+  - **`Research`** (Yes/No, default No) — for companies you paste directly
+    into `Outreach` with just a Company name. Set to `Yes` and a scheduled
+    task (`outreach-contact-research`, runs every 2 hours) looks up a
+    decision-maker's name/email using free sources only (company site,
+    BBB, Texas SOS, web search) — never Apollo, since Apollo requires live
+    per-call approval an unattended run can't get. It never sends
+    anything or touches `Send Approval`.
+  - **`Send Approval`** (Yes/No, default No) — the final human gate.
+    `send_and_followup.py` will not send *anything* for a row, including
+    follow-ups, unless this is `Yes`. Review the Campaign Copy that would
+    actually go out, then flip it yourself.
 - **`Dashboard` / `HARFT Brief` / `Lists`** — reporting and reference tabs,
   set up once by `setup_reporting_tabs.py`.
+
+### Apollo.io connector — current limitation
+
+The connected Apollo account is on Apollo's free plan, which blocks the
+People Search, People Match, and Bulk Match endpoints entirely (both
+single and batch calls fail with "not accessible on this free plan").
+Organization-level contact research currently runs on free web research
+instead (see `Research` column above). Apollo enrichment is still tried
+first in any live chat session (never in the scheduled task), so nothing
+needs to change here if the plan is ever upgraded.
 
 ## What this can and can't see (read this first)
 
@@ -167,10 +188,11 @@ This is B2B cold outreach, so keep it CAN-SPAM-compliant:
 | `prospects_data.py` | Raw 60-company research list |
 | `import_prospects.py` | One-time: loads `prospects_data.py` into the `Prospects` tab |
 | `migrate_prospects_schema.py` | One-shot: migrated `Prospects` to the 23-column schema (Contact Title + Contact 2/3) |
+| `migrate_outreach_schema.py` | One-shot: migrated `Outreach` to add `Research` and `Send Approval` |
 | `generate_campaign_copy.py` | One-time per company: writes personalized 3-email sequences into `Campaign Copy` |
 | `promote_prospect.py` | Moves one vetted, consented prospect from `Prospects` into `Outreach` |
-| `setup_reporting_tabs.py` | One-time: builds `Dashboard`, `HARFT Brief`, `Lists` tabs |
-| `setup_outreach_formatting.py` | One-time: color-codes the `Outreach` Status/Opens columns |
+| `setup_reporting_tabs.py` | One-time/re-runnable: builds/refreshes `Dashboard`, `HARFT Brief`, `Lists` tabs |
+| `setup_outreach_formatting.py` | One-time/re-runnable: color-codes + adds dropdowns to `Outreach` |
 | `send_and_followup.py` | Daily job: sends initial emails + follow-ups, using `Campaign Copy` when available |
 | `check_replies_bounces.py` | Frequent job: detects replies + bounces |
 | `tracking_server.py` | Public web service for the open pixel + unsubscribe (deployed on Render) |
