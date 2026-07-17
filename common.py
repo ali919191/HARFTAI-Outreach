@@ -4,10 +4,12 @@ Shared configuration and Google Sheet helpers used by all three scripts.
 """
 
 import os
+import time
 import uuid
 from datetime import datetime, timedelta
 
 import gspread
+from gspread.exceptions import APIError
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 
@@ -23,12 +25,17 @@ ZOHO_IMAP_PORT = int(os.environ.get("ZOHO_IMAP_PORT", 993))
 
 SENDER_NAME = os.environ.get("SENDER_NAME", "Ali Syed")
 BUSINESS_ADDRESS = os.environ.get("BUSINESS_ADDRESS", "HARFT AI, Houston, TX")
+HARFT_PHONE = os.environ.get("HARFT_PHONE", "+1 832 847 7198")
 
 GOOGLE_SHEET_ID = os.environ["GOOGLE_SHEET_ID"]
 GOOGLE_SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
 SHEET_TAB_NAME = os.environ.get("SHEET_TAB_NAME", "Outreach")
 
 TRACKING_BASE_URL = os.environ["TRACKING_BASE_URL"].rstrip("/")
+
+# Optional -- Hunter.io Email Finder (free tier: 50 credits/month). Leave
+# unset to skip email-finding entirely; everything else still works.
+HUNTER_API_KEY = os.environ.get("HUNTER_API_KEY", "")
 
 # Wait times BETWEEN touches, not absolute days from the first email.
 # e.g. "4,9" = follow-up #1 four days after the initial email (if no reply),
@@ -42,8 +49,13 @@ PARK_AFTER_DAYS = int(os.environ.get("PARK_AFTER_DAYS", 5))
 
 # ---------------- Sheet schema ----------------
 # This exact header row (in this order) must exist in row 1 of your sheet.
+# "ID" matches the Prospects/Campaign Copy ID for any lead that originated
+# there (via sync_prospects.py or promote_prospect.py) -- this is the
+# reliable key used to match a row to its Campaign Copy across tabs. Blank
+# for rows added by hand with no Prospects entry (e.g. an ad-hoc test row);
+# those fall back to matching by Company name instead.
 COLUMNS = [
-    "Company", "Research", "Contact Name", "Email", "Send Approval", "Status", "Sequence Step",
+    "ID", "Company", "Research", "Contact Name", "Email", "Send Approval", "Status", "Sequence Step",
     "Last Sent Date", "Next Action Date", "Opens", "Last Open Date",
     "Replied", "Reply Date", "Bounce Type", "Tracking ID", "Notes",
 ]
@@ -103,14 +115,31 @@ CONSENT_NONE = "No consent"
 CONSENT_SUPPRESSED = "Suppressed"
 
 # ---------------- Campaign Copy tab schema ----------------
-# Generated once by generate_campaign_copy.py, then hand-editable per company.
-# send_and_followup.py reads directly from this tab (matched by Company name)
-# and only falls back to email_templates.STEP_TEMPLATES if a company has no
-# row here yet.
+# Generated once by generate_campaign_copy.py / sync_prospects.py, then
+# hand-editable (or Kai-editable) per company. send_and_followup.py reads
+# directly from this tab (matched by ID, falling back to Company name for
+# legacy rows with no ID) and only falls back to email_templates.STEP_TEMPLATES
+# if a company has no row here yet.
 CAMPAIGN_COPY_COLUMNS = [
     "ID", "Category", "Company", "Subject",
-    "Email 1 (Day 1)", "Email 2 (Day 4)", "Email 3 (Day 9)",
+    "Email 1 (Day 1)", "Email 2 (Day 4)", "Email 3 (Day 9)", "Copy Status",
 ]
+
+# "Copy Status" tracks whether a row's copy is still the raw generated
+# template or has been enhanced/reviewed by a human or an external service
+# (e.g. Kai, which is given direct Google Sheets access to read and rewrite
+# email bodies here). New rows default to NEEDS_ENHANCEMENT if they used the
+# generic (non-sector) fallback copy, or DRAFT otherwise -- see
+# email_templates.SECTOR_CONFIG. send_and_followup.py will NOT send a row
+# whose matched Campaign Copy entry isn't REVIEWED yet -- that's the final
+# human checkpoint, same philosophy as Send Approval on Outreach. Rows with
+# no Campaign Copy entry at all (legacy STEP_TEMPLATES fallback) are exempt
+# from this gate and are governed only by Send Approval, as before.
+COPY_STATUS_DRAFT = "Draft"
+COPY_STATUS_NEEDS_ENHANCEMENT = "Needs Enhancement"
+COPY_STATUS_ENHANCED = "Enhanced"
+COPY_STATUS_REVIEWED = "Reviewed"
+COPY_STATUS_VALUES = [COPY_STATUS_DRAFT, COPY_STATUS_NEEDS_ENHANCEMENT, COPY_STATUS_ENHANCED, COPY_STATUS_REVIEWED]
 
 
 def get_workbook():
@@ -158,10 +187,31 @@ def read_rows(sheet):
     return [(i + 2, row) for i, row in enumerate(records)]
 
 
+def _is_rate_limit_error(err: APIError) -> bool:
+    response = getattr(err, "response", None)
+    if response is not None and getattr(response, "status_code", None) == 429:
+        return True
+    return "RESOURCE_EXHAUSTED" in str(err) or "Quota exceeded" in str(err)
+
+
+def _update_cell_with_retry(sheet, row_number, col, value, max_attempts=4, base_delay=5):
+    """Google Sheets write quotas are per-minute and easy to hit when a batch
+    of rows fires several update_cell() calls back to back. Retries a 429
+    with exponential backoff (5s, 10s, 20s, ...) before giving up."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            sheet.update_cell(row_number, col, value)
+            return
+        except APIError as e:
+            if not _is_rate_limit_error(e) or attempt == max_attempts:
+                raise
+            time.sleep(base_delay * (2 ** (attempt - 1)))
+
+
 def update_cells(sheet, row_number, updates: dict):
     """updates: {column_name: value}"""
     for name, value in updates.items():
-        sheet.update_cell(row_number, col_index(name), value)
+        _update_cell_with_retry(sheet, row_number, col_index(name), value)
 
 
 def new_tracking_id():

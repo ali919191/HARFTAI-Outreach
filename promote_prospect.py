@@ -61,6 +61,7 @@ def main():
         sys.exit(1)
 
     new_row = ["" for _ in COLUMNS]
+    new_row[COLUMNS.index("ID")] = str(match.get("ID", ""))
     new_row[COLUMNS.index("Company")] = match["Company"]
     new_row[COLUMNS.index("Contact Name")] = match["Contact Name"]
     new_row[COLUMNS.index("Email")] = match["Business Email"]

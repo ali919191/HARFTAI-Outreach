@@ -13,6 +13,16 @@ once, by generate_campaign_copy.py, to write personalized copy into the
 Campaign Copy tab -- not called at send time.
 """
 
+from common import HARFT_PHONE
+
+# Shared sign-off block appended to every campaign email so the sequence
+# reads as coming from a real person at a real company, not a bare "Best,".
+# [Sender] resolves to SENDER_NAME (currently "Ali Syed") at send time.
+_SIGNATURE = f"""Best,
+[Sender]
+HARFT AI
+{HARFT_PHONE} | harftai.com"""
+
 # ---------------- Per-vertical messaging config ----------------
 # role  = who the email is addressed to (used for research, not interpolated)
 # metric = the outcome promised
@@ -51,6 +61,18 @@ _TOPIC_BY_CATEGORY = {
 }
 _DEFAULT_TOPIC = "call capture and follow-up"
 
+# Used whenever a Prospects row's Category doesn't match one of the
+# configured verticals above (e.g. a one-off lead outside the core HVAC/
+# Electrical/Dental/Accident Law targeting). Generic enough to still read
+# naturally; edit the resulting Campaign Copy row by hand for anything that
+# needs sharper, sector-specific language.
+_DEFAULT_SECTOR = {
+    "role": "Owner, Operations Manager, or relevant decision-maker",
+    "metric": "faster response and follow-up without adding headcount",
+    "hook": "inbound calls and requests get an immediate, consistent response",
+    "cta": "a 15-minute look at where response time or follow-up could improve",
+}
+
 
 def build_campaign(category, company, city, specialty, pain):
     """Port of the campaign() function from build_outreach_tracker.mjs.
@@ -60,16 +82,28 @@ def build_campaign(category, company, city, specialty, pain):
     writes them into the sheet unresolved, and send_and_followup.py
     substitutes real values at send time (once a real Contact Name exists,
     which it doesn't yet at generation time).
+
+    Never raises: an unrecognized Category falls back to _DEFAULT_SECTOR
+    instead of blocking copy generation, since new prospect categories
+    can be added to the sheet at any time. A blank Pain Hypothesis or Area
+    falls back to a generic line instead of leaving a hole in the email.
     """
-    s = SECTOR_CONFIG.get(category)
-    if not s:
-        raise ValueError(f"No SECTOR_CONFIG for category: {category!r}")
+    s = SECTOR_CONFIG.get(category, _DEFAULT_SECTOR)
+    specialty = (specialty or "").strip()
+    city = (city or "").strip()
+    pain = (pain or "").strip()
 
     subject = f"{company}: a practical way to protect more inbound opportunities"
 
+    location_phrase = f"in the {city} area" if city else "in your market"
+    specialty_phrase = f"{specialty.lower()} providers {location_phrase}" if specialty else f"providers {location_phrase}"
+    pain_line = pain or (
+        f"Many teams like this find that inbound calls and follow-ups compete with day-to-day operations."
+    )
+
     email1 = f"""Hi [First name],
 
-I came across {company} while looking at {specialty.lower()} providers in the {city} area. {pain}
+I came across {company} while looking at {specialty_phrase}. {pain_line}
 
 HARFT AI runs managed AI operations for teams like yours—not another tool to learn. We design, deploy, and continuously improve AI that answers calls, qualifies requests, books appointments, follows up, and logs every interaction inside the systems you already use.
 
@@ -77,10 +111,7 @@ For {company}, the first use case would likely be making sure {s['hook']}, so yo
 
 Would you be open to {s['cta']}?
 
-Best,
-[Sender]
-HARFT AI
-Houston | harftai.com
+{_SIGNATURE}
 
 P.S. If someone else owns operations or intake, I'm happy to reach out to them instead."""
 
@@ -94,8 +125,7 @@ A useful starting point is often one workflow: answer and qualify every inbound 
 
 Is improving {topic} a priority this quarter?
 
-Best,
-[Sender]"""
+{_SIGNATURE}"""
 
     email3 = f"""Hi [First name],
 
@@ -105,8 +135,7 @@ If not, HARFT can map one high-value workflow and show what managed AI operation
 
 Should I send a short example, or is there a better person to speak with?
 
-Best,
-[Sender]
+{_SIGNATURE}
 
 To opt out of future messages, reply "unsubscribe.\""""
 
@@ -126,7 +155,9 @@ HARFT AI runs managed AI operations for teams like yours -- we design, deploy, a
 As part of our launch, we're onboarding a pilot batch of 15 clients and waiving the implementation fee entirely (normally $3,000-$5,000). Would you be open to a 15-minute look at where calls or estimate follow-ups may be leaking?
 
 Best,
-{sender_name}""",
+{sender_name}
+HARFT AI
+{harft_phone} | harftai.com""",
     },
     1: {
         "subject": "Re: Capturing after-hours HVAC calls for {company}",
@@ -135,7 +166,9 @@ Best,
 Following up in case my note last week got buried. Happy to keep this brief: we're holding a few spots left in our pilot batch (implementation fee waived), and I'd love 15 minutes to see if after-hours calls are something worth solving for {company}.
 
 Best,
-{sender_name}""",
+{sender_name}
+HARFT AI
+{harft_phone} | harftai.com""",
     },
     2: {
         "subject": "Re: Capturing after-hours HVAC calls for {company}",
@@ -144,6 +177,8 @@ Best,
 Last note from me on this -- I don't want to clutter your inbox. If missed after-hours calls aren't a priority right now, no worries at all. If it becomes one, happy to pick this back up any time.
 
 Best,
-{sender_name}""",
+{sender_name}
+HARFT AI
+{harft_phone} | harftai.com""",
     },
 }

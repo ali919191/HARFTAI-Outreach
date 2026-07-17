@@ -14,8 +14,8 @@ Usage:
     python generate_campaign_copy.py
 """
 
-from common import get_workbook, ensure_worksheet, PROSPECT_COLUMNS, CAMPAIGN_COPY_COLUMNS
-from email_templates import build_campaign
+from common import get_workbook, ensure_worksheet, PROSPECT_COLUMNS, CAMPAIGN_COPY_COLUMNS, COPY_STATUS_DRAFT, COPY_STATUS_NEEDS_ENHANCEMENT
+from email_templates import build_campaign, SECTOR_CONFIG
 
 
 def main():
@@ -30,31 +30,27 @@ def main():
     }
 
     new_rows = []
-    skipped = 0
     for p in prospects:
         pid = p.get("ID")
         if not pid or pid in existing_ids:
             continue
-        try:
-            subject, e1, e2, e3 = build_campaign(
-                category=p["Category"],
-                company=p["Company"],
-                city=p["Area"],
-                specialty=p["Specialty"],
-                pain=p["Pain Hypothesis"],
-            )
-        except ValueError:
-            skipped += 1
-            continue
-        new_rows.append([pid, p["Category"], p["Company"], subject, e1, e2, e3])
+        subject, e1, e2, e3 = build_campaign(
+            category=p["Category"],
+            company=p["Company"],
+            city=p["Area"],
+            specialty=p["Specialty"],
+            pain=p["Pain Hypothesis"],
+        )
+        # Rows that fell back to generic (non-sector) copy are flagged for
+        # enhancement by default, since that copy reads more templated.
+        status = COPY_STATUS_DRAFT if p["Category"] in SECTOR_CONFIG else COPY_STATUS_NEEDS_ENHANCEMENT
+        new_rows.append([pid, p["Category"], p["Company"], subject, e1, e2, e3, status])
 
     if new_rows:
         copy_ws.append_rows(new_rows, value_input_option="RAW")
         print(f"Generated campaign copy for {len(new_rows)} new prospect(s).")
     else:
         print("No new prospects need campaign copy -- Campaign Copy tab is up to date.")
-    if skipped:
-        print(f"Skipped {skipped} prospect(s) with an unrecognized Category (no SECTOR_CONFIG entry).")
 
 
 if __name__ == "__main__":

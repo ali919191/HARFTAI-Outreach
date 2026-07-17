@@ -14,7 +14,8 @@ Usage:
 
 from gspread.utils import ValidationConditionType
 
-from common import get_workbook, ensure_worksheet, col_letter, PROSPECT_COLUMNS, COLUMNS
+from common import get_workbook, ensure_worksheet, col_letter, PROSPECT_COLUMNS, COLUMNS, CAMPAIGN_COPY_COLUMNS, COPY_STATUS_VALUES
+from setup_outreach_formatting import COLORS, _rule
 
 
 def setup_dashboard(sh):
@@ -110,6 +111,45 @@ def setup_prospect_validation(sh):
     print(f"Prospects tab dropdowns set up (Status={status_col}, Consent Check={consent_col}).")
 
 
+def setup_campaign_copy_validation(sh):
+    """Dropdown + color-coding for the Copy Status column on Campaign Copy,
+    so Kai's (or a human's) progress through Draft -> Needs Enhancement ->
+    Enhanced -> Reviewed is visible at a glance. Safe to re-run: clears any
+    conditional format rules this function previously added before re-adding."""
+    ws = sh.worksheet("Campaign Copy")
+    sheet_id = ws.id
+    status_col = col_letter(CAMPAIGN_COPY_COLUMNS, "Copy Status")
+
+    ws.add_validation(
+        f"{status_col}2:{status_col}1000",
+        ValidationConditionType.one_of_list,
+        COPY_STATUS_VALUES,
+        showCustomUi=True,
+    )
+
+    meta = sh.fetch_sheet_metadata()
+    existing_rule_count = 0
+    for s in meta["sheets"]:
+        if s["properties"]["sheetId"] == sheet_id:
+            existing_rule_count = len(s.get("conditionalFormats", []))
+            break
+    requests = [
+        {"deleteConditionalFormatRule": {"sheetId": sheet_id, "index": 0}}
+        for _ in range(existing_rule_count)
+    ]
+
+    idx = CAMPAIGN_COPY_COLUMNS.index("Copy Status")
+    status_range = {"sheetId": sheet_id, "startRowIndex": 1, "startColumnIndex": idx, "endColumnIndex": idx + 1}
+    requests += [
+        _rule(status_range, {"type": "TEXT_EQ", "values": [{"userEnteredValue": "Reviewed"}]}, COLORS["green"], COLORS["green_text"]),
+        _rule(status_range, {"type": "TEXT_EQ", "values": [{"userEnteredValue": "Needs Enhancement"}]}, COLORS["red"], COLORS["red_text"]),
+        _rule(status_range, {"type": "TEXT_EQ", "values": [{"userEnteredValue": "Enhanced"}]}, COLORS["blue"], COLORS["blue_text"]),
+        _rule(status_range, {"type": "TEXT_EQ", "values": [{"userEnteredValue": "Draft"}]}, COLORS["gray"], COLORS["gray_text"]),
+    ]
+    sh.batch_update({"requests": requests})
+    print(f"Campaign Copy tab: Copy Status dropdown + color-coding set up (column {status_col}).")
+
+
 def main():
     sh = get_workbook()
     setup_dashboard(sh)
@@ -119,6 +159,10 @@ def main():
         setup_prospect_validation(sh)
     except Exception as e:
         print(f"Skipped dropdown setup (Prospects tab may not exist yet): {e}")
+    try:
+        setup_campaign_copy_validation(sh)
+    except Exception as e:
+        print(f"Skipped Campaign Copy dropdown setup (tab may not exist yet): {e}")
 
 
 if __name__ == "__main__":

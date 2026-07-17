@@ -105,21 +105,27 @@ def main():
             if matched_email:
                 row_number, row = by_email[matched_email]
                 bounce_type = classify_bounce(body_text)
-                update_cells(sheet, row_number, {
-                    "Status": bounce_type,
-                    "Bounce Type": bounce_type.replace("Bounced - ", ""),
-                    "Notes": f"Bounce detected {today_str()}",
-                })
+                try:
+                    update_cells(sheet, row_number, {
+                        "Status": bounce_type,
+                        "Bounce Type": bounce_type.replace("Bounced - ", ""),
+                        "Notes": f"Bounce detected {today_str()}",
+                    })
+                except Exception as e:
+                    print(f"Row {row_number}: failed to record bounce: {e}")
             continue
 
         matched = next((e for e in by_email if e in from_addr), None)
         if matched:
             row_number, row = by_email[matched]
-            update_cells(sheet, row_number, {
-                "Status": STATUS_REPLIED,
-                "Replied": "Y",
-                "Reply Date": today_str(),
-            })
+            try:
+                update_cells(sheet, row_number, {
+                    "Status": STATUS_REPLIED,
+                    "Replied": "Y",
+                    "Reply Date": today_str(),
+                })
+            except Exception as e:
+                print(f"Row {row_number}: failed to record reply: {e}")
 
     imap.close()
     imap.logout()

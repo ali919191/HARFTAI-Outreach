@@ -7,12 +7,16 @@ dashboard.
 ## How a company moves through the pipeline
 
 ```
-Prospects tab (research/staging)  --promote_prospect.py-->  Outreach tab (live send pipeline)
-       ^                                                            |
-       |                                                    send_and_followup.py /
-  import_prospects.py                                       check_replies_bounces.py
-  generate_campaign_copy.py
+Prospects tab (research/staging)  --sync_prospects.py-->  Outreach tab (live send pipeline)
+       ^          \                                              |
+       |           \--> Campaign Copy (generated same pass)      | send_and_followup.py /
+  import_prospects.py                                            | check_replies_bounces.py
 ```
+
+Every row carries the same `ID` across all three tabs (Prospects, Outreach,
+Campaign Copy), so a company added once in `Prospects` is unambiguous
+everywhere downstream — no more hunting for which row number matches which
+company by name.
 
 - **`Prospects`** — one row per researched company (currently 60, across
   HVAC/Electrical/Dental/Accident Law). Nothing here is ever emailed
@@ -20,26 +24,73 @@ Prospects tab (research/staging)  --promote_prospect.py-->  Outreach tab (live s
   `Consent Check` to `Confirmed` once you've found and vetted a real
   decision-maker.
 - **`Campaign Copy`** — a personalized 3-email sequence per company
-  (Day 1 / Day 4 / Day 9), generated once by `generate_campaign_copy.py`.
-  Hand-edit any cell here any time — the generator never overwrites a row
-  that already exists, so your edits are permanent.
-- **`promote_prospect.py "Company Name"`** — the one manual gate. Refuses
-  to run unless Contact Name + Business Email + a confirmed Consent Check
-  are all set. On success, copies the lead into `Outreach` as a new row,
-  where the existing daily/30-min automation picks it up.
+  (Day 1 / Day 4 / Day 9), generated once by `generate_campaign_copy.py` /
+  `sync_prospects.py`. Hand-edit (or Kai-edit — see below) any cell here any
+  time; the generator never overwrites a row that already exists, so edits
+  are permanent. Each row has a `Copy Status` column (dropdown:
+  `Draft` / `Needs Enhancement` / `Enhanced` / `Reviewed`) that tracks where
+  that copy is in review. New rows default to `Needs Enhancement` if their
+  Category fell back to generic (non-sector) copy, or `Draft` otherwise.
+  **`send_and_followup.py` will not send a row unless its Campaign Copy
+  entry is marked `Reviewed`** — this is a second, independent gate from
+  `Send Approval` on Outreach; both must be satisfied. Rows with no Campaign
+  Copy entry at all (the legacy generic fallback) are exempt and are
+  governed by `Send Approval` alone, as before.
+
+  **External copy review (e.g. Kai):** since this tab is the literal source
+  `send_and_followup.py` reads from on every run, any service with Google
+  Sheets access to this spreadsheet can rewrite a body here and have it go
+  out as-is next send cycle — no code changes needed. If you point Kai (or
+  anything else) at this tab, it needs to know:
+  1. Only touch rows where `Copy Status = Needs Enhancement` (that's the
+     queue), and set it to `Enhanced` when done rewriting a row.
+  2. Never delete or resolve the literal strings `[First name]` and
+     `[Sender]` inside a body — `send_and_followup.py` substitutes those
+     with the real Contact Name and your sender name at send time. Removing
+     them breaks personalization for that lead.
+  3. It can freely rewrite Subject and any of the three email bodies for a
+     row; it should not touch `ID`, `Category`, or `Company`.
+  4. `Copy Status = Reviewed` (the value that actually clears a row to
+     send) is meant to be set by a human after checking the final text —
+     don't have Kai set this itself unless you intend that.
+  5. For consistent tone/positioning, have Kai read the `HARFT Brief` tab
+     before rewriting — it's the canonical summary of HARFT AI's pitch,
+     compatible platforms, and compliance guardrails (e.g. avoid ROI
+     guarantees).
+- **`promote_prospect.py "Company Name"`** — the strict manual gate (legacy
+  path). Refuses to run unless Contact Name + Business Email + a confirmed
+  Consent Check are all set.
+- **`sync_prospects.py`** — the normal path now. Run with no argument to
+  pick up *every* Prospects row that isn't in Outreach yet, or
+  `python sync_prospects.py "Company Name"` for just one. No consent check
+  required (Send Approval is what actually gates a send, so this is safe to
+  run freely): it adds the row to `Outreach` (`Research=Yes` if a Contact
+  Name or Email is still missing, `No` if you already supplied both) and
+  generates that company's Campaign Copy in the same pass, using whatever
+  Category/Specialty/Pain Hypothesis is already on the Prospects row. An
+  unrecognized Category falls back to generic (non-sector) copy instead of
+  failing, so this works for any new company you add, not just
+  HVAC/Electrical/Dental/Accident Law.
 - **`Outreach`** — the live send pipeline `send_and_followup.py` and
-  `check_replies_bounces.py` watch. It pulls each company's copy from
-  `Campaign Copy` (matched by Company name) instead of a single generic
-  template — falling back to the old generic HVAC template only for leads
-  with no matching Campaign Copy row (e.g. hand-added leads, or the
-  original `Test Co 1` test row). Two extra columns gate everything:
+  `check_replies_bounces.py` watch. Its first column, `ID`, is the same
+  Prospects ID you'll see on that company's row in `Prospects` and
+  `Campaign Copy` — `sync_prospects.py`/`promote_prospect.py` carry it over
+  automatically, so you can always tell which rows across the three tabs
+  belong to the same company at a glance, even if the Company text differs
+  slightly (punctuation, capitalization). `send_and_followup.py` matches a
+  row to its `Campaign Copy` by this ID first; it only falls back to
+  matching by Company name for older/hand-added rows with no ID (e.g. the
+  original `Test Co 1` test row), and falls back further to the old generic
+  HVAC template if there's no Campaign Copy row at all. Two extra columns
+  gate everything:
   - **`Research`** (Yes/No, default No) — for companies you paste directly
     into `Outreach` with just a Company name. Set to `Yes` and a scheduled
     task (`outreach-contact-research`, runs every 2 hours) looks up a
-    decision-maker's name/email using free sources only (company site,
-    BBB, Texas SOS, web search) — never Apollo, since Apollo requires live
-    per-call approval an unattended run can't get. It never sends
-    anything or touches `Send Approval`.
+    decision-maker's name using free sources only (company site, BBB,
+    Texas SOS, web search), then tries Hunter.io's Email Finder for a
+    verified email once a name is known — never Apollo, since Apollo
+    requires live per-call approval an unattended run can't get. It never
+    sends anything or touches `Send Approval`.
   - **`Send Approval`** (Yes/No, default No) — the final human gate.
     `send_and_followup.py` will not send *anything* for a row, including
     follow-ups, unless this is `Yes`. Review the Campaign Copy that would
@@ -56,6 +107,24 @@ Organization-level contact research currently runs on free web research
 instead (see `Research` column above). Apollo enrichment is still tried
 first in any live chat session (never in the scheduled task), so nothing
 needs to change here if the plan is ever upgraded.
+
+### Finding verified emails — Hunter.io
+
+Once a decision-maker's name is known (from `Prospects` or via the
+`Research` flag), `find_emails.py` looks up a verified email through
+Hunter.io's Email Finder. Free tier: 50 credits/month, no card required.
+
+1. Sign up at [hunter.io](https://hunter.io) (free plan, no card).
+2. In the dashboard, go to your account/API settings and copy your API key.
+3. Add it to `.env`: `HUNTER_API_KEY=your-key-here`.
+4. Run `python find_emails.py` — checks every `Prospects` row with a
+   Contact Name but no Business Email, and mirrors any email it finds into
+   the matching `Outreach` row too.
+
+Only results Hunter itself scores at 70%+ confidence are ever written in;
+anything lower is left blank rather than risk a bad address. The
+scheduled `outreach-contact-research` task also calls Hunter automatically
+(capped at 5 lookups per run) once it finds a name via free web research.
 
 ## What this can and can't see (read this first)
 
@@ -189,10 +258,14 @@ This is B2B cold outreach, so keep it CAN-SPAM-compliant:
 | `import_prospects.py` | One-time: loads `prospects_data.py` into the `Prospects` tab |
 | `migrate_prospects_schema.py` | One-shot: migrated `Prospects` to the 23-column schema (Contact Title + Contact 2/3) |
 | `migrate_outreach_schema.py` | One-shot: migrated `Outreach` to add `Research` and `Send Approval` |
+| `migrate_outreach_add_id.py` | One-shot: added the `ID` column to `Outreach`, matched to Prospects by Company name |
 | `generate_campaign_copy.py` | One-time per company: writes personalized 3-email sequences into `Campaign Copy` |
-| `promote_prospect.py` | Moves one vetted, consented prospect from `Prospects` into `Outreach` |
+| `promote_prospect.py` | Legacy strict path: moves one vetted, consented prospect from `Prospects` into `Outreach` |
+| `sync_prospects.py` | Normal path: auto-adds any new Prospects row to `Outreach` + generates its Campaign Copy |
 | `setup_reporting_tabs.py` | One-time/re-runnable: builds/refreshes `Dashboard`, `HARFT Brief`, `Lists` tabs |
 | `setup_outreach_formatting.py` | One-time/re-runnable: color-codes + adds dropdowns to `Outreach` |
+| `hunter_email_finder.py` | Wraps Hunter.io's Email Finder API, enforces the 70%-confidence floor |
+| `find_emails.py` | Re-runnable: finds verified emails for `Prospects` rows with a known name but no email |
 | `send_and_followup.py` | Daily job: sends initial emails + follow-ups, using `Campaign Copy` when available |
 | `check_replies_bounces.py` | Frequent job: detects replies + bounces |
 | `tracking_server.py` | Public web service for the open pixel + unsubscribe (deployed on Render) |
