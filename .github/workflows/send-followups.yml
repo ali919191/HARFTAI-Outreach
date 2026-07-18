@@ -1,0 +1,46 @@
+name: Send Initial Emails & Follow-ups
+
+on:
+  schedule:
+    - cron: '0 14 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  send-followups:
+    runs-on: ubuntu-latest
+    env:
+      ZOHO_EMAIL: ${{ secrets.ZOHO_EMAIL }}
+      ZOHO_APP_PASSWORD: ${{ secrets.ZOHO_APP_PASSWORD }}
+      ZOHO_SMTP_HOST: ${{ secrets.ZOHO_SMTP_HOST }}
+      ZOHO_SMTP_PORT: ${{ secrets.ZOHO_SMTP_PORT }}
+      ZOHO_IMAP_HOST: ${{ secrets.ZOHO_IMAP_HOST }}
+      ZOHO_IMAP_PORT: ${{ secrets.ZOHO_IMAP_PORT }}
+      SENDER_NAME: ${{ secrets.SENDER_NAME }}
+      BUSINESS_ADDRESS: ${{ secrets.BUSINESS_ADDRESS }}
+      HARFT_PHONE: ${{ secrets.HARFT_PHONE }}
+      GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_FILE }}
+      SHEET_TAB_NAME: ${{ secrets.SHEET_TAB_NAME }}
+      TRACKING_BASE_URL: ${{ secrets.TRACKING_BASE_URL }}
+      HUNTER_API_KEY: ${{ secrets.HUNTER_API_KEY }}
+      FOLLOWUP_DAYS: ${{ secrets.FOLLOWUP_DAYS }}
+      PARK_AFTER_DAYS: ${{ secrets.PARK_AFTER_DAYS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google service account credentials
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > service_account.json
+
+      - name: Run send_and_followup.py
+        run: python send_and_followup.py
